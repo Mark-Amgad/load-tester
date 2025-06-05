@@ -1,8 +1,9 @@
 import asyncio
+import time
 from http.client import responses
+from typing import List
 
 import httpx
-import time
 from rich.console import Console
 from rich.table import Table
 
@@ -47,6 +48,42 @@ async def send_request(client: httpx.AsyncClient, config: Config) -> HTTPRespons
         )
 
 
+async def run_workers(config: Config) -> List[HTTPResponseResult]:
+    """
+    Run concurrent HTTP requests according to config.
+    Returns:
+        List of HTTPResponseResult
+    """
+    results: List[HTTPResponseResult] = []
+
+    number_of_requests = config.requests
+    number_of_concurrent_requests = config.concurrency
+
+    limits = httpx.Limits(
+        max_keepalive_connections=number_of_concurrent_requests,
+        max_connections=number_of_concurrent_requests,
+    )
+
+    async with httpx.AsyncClient(timeout=10, limits=limits) as client:
+        tasks: List[asyncio.Task] = []
+        for _ in range(number_of_requests):
+            tasks.append(asyncio.create_task(send_request(client, config)))
+            if len(tasks) >= number_of_concurrent_requests:
+                batch = await asyncio.gather(*tasks)
+                print("Patch Executed")
+                results.extend(batch)
+                tasks.clear()
+
+        # Final batch
+        if tasks:
+            batch = await asyncio.gather(*tasks)
+            results.extend(batch)
+
+    return results
+
+
 def run_test(config: Config):
-    res = asyncio.run(send_request(httpx.AsyncClient(), config))
-    return res
+    # TODO: add logs for starting the test
+    results = asyncio.run(run_workers(config))
+    return results
+    # TODO: calculate a report on the result
