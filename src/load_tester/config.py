@@ -1,9 +1,12 @@
-import typer
 from typing import Optional
 
-from pydantic import HttpUrl
+import typer
+from rich.console import Console
+from rich.table import Table
 
-from load_tester.models.config import Config, HTTPMethod
+from load_tester.models.config import Config
+from load_tester.models.config import HTTPMethod
+from load_tester.report import Report
 from load_tester.tester import run_test
 
 app = typer.Typer(help="Simple REST API Load Tester")
@@ -51,6 +54,9 @@ def run(
 
     print("configs:", config)
     print("Start Testing .. ")
-    res = run_test(config)
+    results = run_test(config)
     print("End Testing .. ")
-    print("Test Results: ", res)
+    # success_count: int = sum(1 for r in results if r.is_success)
+    # failure_count: int = len(results) - success_count
+    report = Report(results=results)
+    report.print_summary()
