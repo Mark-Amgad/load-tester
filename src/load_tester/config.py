@@ -1,8 +1,6 @@
 from typing import Optional
 
 import typer
-from rich.console import Console
-from rich.table import Table
 
 from load_tester.models.config import Config
 from load_tester.models.config import HTTPMethod
@@ -56,7 +54,5 @@ def run(
     print("Start Testing .. ")
     results = run_test(config)
     print("End Testing .. ")
-    # success_count: int = sum(1 for r in results if r.is_success)
-    # failure_count: int = len(results) - success_count
     report = Report(results=results)
     report.print_summary()
