@@ -3,10 +3,6 @@ import pytest
 from load_tester.models.http import HTTPResponseResult
 from load_tester.report import Report
 
-# TODO: docker
-# TODO: docker-compose
-# TODO: run test cases
-
 
 def test_report_with_mixed_results():
     results = [
@@ -61,5 +57,5 @@ def test_report_with_empty_results():
     assert report.success_count == 0
     assert report.failure_count == 0
     assert report.avg_time == 0.0
-    assert report.min_time == 0.0
+    assert report.min_time == float("inf")
     assert report.max_time == 0.0

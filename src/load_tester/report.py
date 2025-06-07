@@ -12,7 +12,7 @@ class Report:
         self.success_count = 0
         self.failure_count = 0
         self.avg_time = 0
-        self.min_time = 0
+        self.min_time = float("inf")
         self.max_time = 0
         self._generate_basic_report()
 
@@ -24,15 +24,14 @@ class Report:
             else:
                 self.failure_count += 1
 
-            if r.response_time > self.max_time:
-                self.max_time = r.response_time
-
-            if r.response_time < self.min_time:
-                self.min_time = r.response_time
-
+            self.max_time = max(self.max_time, r.response_time)
+            self.min_time = min(self.min_time, r.response_time)
             sum_ += r.response_time
 
-        self.avg_time = sum_ / len(self.results)
+        if len(self.results) > 0:
+            self.avg_time = sum_ / len(self.results)
+        else:
+            self.avg_time = 0
 
     def print_summary(self):
         table = Table(

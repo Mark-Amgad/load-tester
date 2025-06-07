@@ -1,0 +1,11 @@
+version: "3.8"
+
+services:
+  load-tester:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - .:/app
+    working_dir: /app
+    tty: true  # Keeps the container open so you can exec into it
