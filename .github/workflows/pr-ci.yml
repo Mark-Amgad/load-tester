@@ -1,0 +1,24 @@
+name: PR Test with Docker Compose + Poetry
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Start Docker Compose
+        run: |
+          docker compose up -d
+          sleep 10
+          docker compose exec load-tester poetry run pytest
+
+      - name: Shut down Docker Compose
+        if: always()
+        run: docker compose down
