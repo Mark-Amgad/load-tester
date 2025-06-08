@@ -21,6 +21,7 @@ jobs:
       with:
         token: ${{ secrets.GITHUB_TOKEN }}
         fetch-depth: 0
+        ref: ${{ github.head_ref }}
 
     - name: Generate new RCHASH
       id: generate-hash
@@ -59,7 +60,7 @@ jobs:
         git config --local user.name "GitHub Action"
         git add helm-chart/Chart.yml
         git commit -m "chore: update RCHASH to ${{ steps.generate-hash.outputs.new_hash }} for PR #${{ github.event.number }}"
-        git push
+        git push origin HEAD:${{ github.head_ref }}
 
     - name: Comment on PR
       if: steps.check-changes.outputs.changes_made == 'true'
