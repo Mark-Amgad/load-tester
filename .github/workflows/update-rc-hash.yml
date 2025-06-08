@@ -1,75 +1,136 @@
-# .github/workflows/update-rchash.yml
-name: Update RCHASH in Helm Chart
+# .github/workflows/resolve-rchash-conflicts.yml
+name: Resolve RCHASH Conflicts After Merge
 
 on:
-  pull_request:
-    types: [opened, synchronize]
+  push:
     branches:
-      - main  # Adjust this to your default branch name
+      - main
+    paths:
+      - 'helm-chart/Chart.yml'
 
 permissions:
   contents: write
   pull-requests: write
 
 jobs:
-  update-rchash:
+  resolve-conflicts:
     runs-on: ubuntu-latest
-    
+
     steps:
-    - name: Checkout code
+    - name: Checkout main branch
       uses: actions/checkout@v4
       with:
         token: ${{ secrets.GITHUB_TOKEN }}
         fetch-depth: 0
-        ref: ${{ github.head_ref }}
 
-    - name: Generate new RCHASH
-      id: generate-hash
+    - name: Setup Git
       run: |
-        # Generate a hash based on PR number and current timestamp
-        PR_NUMBER="${{ github.event.number }}"
-        TIMESTAMP=$(date +%s)
-        NEW_HASH=$(echo "${PR_NUMBER}-${TIMESTAMP}" | sha256sum | cut -c1-8)
-        echo "new_hash=${NEW_HASH}rc" >> $GITHUB_OUTPUT
-        echo "Generated RCHASH: ${NEW_HASH}rc"
+        git config --global user.email "action@github.com"
+        git config --global user.name "GitHub Action"
 
-    - name: Update RCHASH in Chart.yml
+    - name: Resolve RCHASH conflicts in open PRs
       run: |
-        # Update the RCHASH value in the Chart.yml file
-        sed -i "s/RCHASH: .*/RCHASH: ${{ steps.generate-hash.outputs.new_hash }}/" helm-chart/Chart.yml
+        # Get all open PRs using GitHub CLI
+        gh auth login --with-token <<< "${{ secrets.GITHUB_TOKEN }}"
         
-        # Verify the change
-        echo "Updated Chart.yml content:"
-        cat helm-chart/Chart.yml | grep RCHASH
-
-    - name: Check if changes were made
-      id: check-changes
-      run: |
-        if git diff --quiet helm-chart/Chart.yml; then
-          echo "No changes detected"
-          echo "changes_made=false" >> $GITHUB_OUTPUT
-        else
-          echo "Changes detected"
-          echo "changes_made=true" >> $GITHUB_OUTPUT
-        fi
-
-    - name: Commit and push changes
-      if: steps.check-changes.outputs.changes_made == 'true'
-      run: |
-        git config --local user.email "action@github.com"
-        git config --local user.name "GitHub Action"
-        git add helm-chart/Chart.yml
-        git commit -m "chore: update RCHASH to ${{ steps.generate-hash.outputs.new_hash }} for PR #${{ github.event.number }}"
-        git push origin HEAD:${{ github.head_ref }}
-
-    - name: Comment on PR
-      if: steps.check-changes.outputs.changes_made == 'true'
-      uses: actions/github-script@v7
-      with:
-        script: |
-          github.rest.issues.createComment({
-            issue_number: context.issue.number,
-            owner: context.repo.owner,
-            repo: context.repo.repo,
-            body: `🔄 **RCHASH Updated**\n\nThe RCHASH value has been automatically updated to: \`${{ steps.generate-hash.outputs.new_hash }}\``
-          });
+        # Get open PRs as JSON
+        OPEN_PRS=$(gh pr list --state open --base main --json number,headRefName,title)
+        
+        echo "Open PRs: $OPEN_PRS"
+        
+        # Process each PR
+        echo "$OPEN_PRS" | jq -c '.[]' | while read pr; do
+          PR_NUMBER=$(echo "$pr" | jq -r '.number')
+          PR_BRANCH=$(echo "$pr" | jq -r '.headRefName')
+          PR_TITLE=$(echo "$pr" | jq -r '.title')
+          
+          echo ""
+          echo "--- Processing PR #$PR_NUMBER: $PR_TITLE ---"
+          echo "Branch: $PR_BRANCH"
+          
+          # Check if Chart.yml exists in PR branch
+          if ! git show origin/$PR_BRANCH:helm-chart/Chart.yml > /dev/null 2>&1; then
+            echo "PR #$PR_NUMBER: No Chart.yml found, skipping"
+            continue
+          fi
+          
+          # Get RCHASH from PR branch (before any conflicts)
+          PR_RCHASH=$(git show origin/$PR_BRANCH:helm-chart/Chart.yml | grep "RCHASH:" | awk '{print $2}' | tr -d ' ')
+          
+          # Get RCHASH from main branch
+          MAIN_RCHASH=$(git show main:helm-chart/Chart.yml | grep "RCHASH:" | awk '{print $2}' | tr -d ' ')
+          
+          echo "PR #$PR_NUMBER RCHASH: $PR_RCHASH"
+          echo "Main RCHASH: $MAIN_RCHASH"
+          
+          if [ "$PR_RCHASH" = "$MAIN_RCHASH" ]; then
+            echo "PR #$PR_NUMBER: No RCHASH conflict, skipping"
+            continue
+          fi
+          
+          # Checkout PR branch
+          git checkout -B temp-$PR_BRANCH origin/$PR_BRANCH
+          
+          # Check if there are conflicts by trying to merge
+          if git merge main --no-commit --no-ff > /dev/null 2>&1; then
+            echo "PR #$PR_NUMBER: No conflicts, cleaning up merge"
+            git merge --abort
+            continue
+          fi
+          
+          echo "PR #$PR_NUMBER: Conflicts detected, resolving..."
+          
+          # Merge main into PR branch (this will create conflicts)
+          git merge main --no-commit --no-ff || true
+          
+          # Check if Chart.yml has conflicts
+          if grep -q "<<<<<<< " helm-chart/Chart.yml 2>/dev/null; then
+            echo "PR #$PR_NUMBER: Found conflict markers in Chart.yml, resolving..."
+            
+            # Get the clean version from main
+            git show main:helm-chart/Chart.yml > helm-chart/Chart.yml.tmp
+            
+            # Replace main's RCHASH with PR's RCHASH
+            sed -i "s/RCHASH: .*/RCHASH: $PR_RCHASH/" helm-chart/Chart.yml.tmp
+            
+            # Replace the conflicted file with resolved version
+            mv helm-chart/Chart.yml.tmp helm-chart/Chart.yml
+            
+            # Mark as resolved
+            git add helm-chart/Chart.yml
+            
+            echo "PR #$PR_NUMBER: Resolved RCHASH conflict, keeping: $PR_RCHASH"
+          else
+            echo "PR #$PR_NUMBER: No conflicts in Chart.yml"
+          fi
+          
+          # Complete the merge
+          git commit -m "chore: merge main and resolve RCHASH conflict, keep PR value $PR_RCHASH" || {
+            echo "PR #$PR_NUMBER: Nothing to commit, conflicts may have been auto-resolved"
+            git merge --abort
+            continue
+          }
+          
+          # Push to PR branch
+          git push origin temp-$PR_BRANCH:$PR_BRANCH
+          
+          echo "PR #$PR_NUMBER: Successfully resolved and pushed"
+          
+          # Comment on PR
+          gh pr comment $PR_NUMBER --body "🔧 **RCHASH Conflict Auto-Resolved**
+        
+        A merge to main caused a conflict in \`helm-chart/Chart.yml\`. The conflict has been automatically resolved by:
+        
+        - ✅ **Merging latest changes from main**
+        - ✅ **Keeping your PR's RCHASH**: \`$PR_RCHASH\`
+        
+        Your PR is now up-to-date and ready for review! 🚀"
+          
+          # Clean up
+          git checkout main
+          git branch -D temp-$PR_BRANCH
+          
+        done
+        
+        echo ""
+        echo "--- Conflict resolution completed ---"
