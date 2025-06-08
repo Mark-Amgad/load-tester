@@ -71,53 +71,44 @@ jobs:
           # Checkout PR branch
           git checkout -B temp-$PR_BRANCH origin/$PR_BRANCH
           
-          # Check if there are conflicts by trying to merge
+          # Check if there would be conflicts by doing a test merge
           if git merge main --no-commit --no-ff > /dev/null 2>&1; then
-            echo "PR #$PR_NUMBER: No conflicts, cleaning up merge"
+            echo "PR #$PR_NUMBER: No conflicts at all, cleaning up"
             git merge --abort
             continue
           fi
           
-          echo "PR #$PR_NUMBER: Conflicts detected, resolving..."
+          echo "PR #$PR_NUMBER: Conflicts detected, checking if Chart.yml is the only conflict..."
           
-          # Merge main into PR branch (this will create conflicts)
+          # Start merge to see what files have conflicts
           git merge main --no-commit --no-ff || true
           
-          # Check if Chart.yml has conflicts
-          if grep -q "<<<<<<< " helm-chart/Chart.yml 2>/dev/null; then
-            echo "PR #$PR_NUMBER: Found conflict markers in Chart.yml, resolving..."
+          # Get list of files with conflicts
+          CONFLICT_FILES=$(git diff --name-only --diff-filter=U)
+          echo "Files with conflicts: $CONFLICT_FILES"
+          
+          # Check if Chart.yml is the ONLY file with conflicts
+          if [ "$CONFLICT_FILES" = "helm-chart/Chart.yml" ]; then
+            echo "PR #$PR_NUMBER: Only Chart.yml has conflicts, proceeding with resolution..."
             
-            # Get the clean version from main
+            # Resolve Chart.yml conflict by keeping main's version but with PR's RCHASH
             git show main:helm-chart/Chart.yml > helm-chart/Chart.yml.tmp
-            
-            # Replace main's RCHASH with PR's RCHASH
             sed -i "s/RCHASH: .*/RCHASH: $PR_RCHASH/" helm-chart/Chart.yml.tmp
-            
-            # Replace the conflicted file with resolved version
             mv helm-chart/Chart.yml.tmp helm-chart/Chart.yml
             
             # Mark as resolved
             git add helm-chart/Chart.yml
             
-            echo "PR #$PR_NUMBER: Resolved RCHASH conflict, keeping: $PR_RCHASH"
-          else
-            echo "PR #$PR_NUMBER: No conflicts in Chart.yml"
-          fi
-          
-          # Complete the merge
-          git commit -m "chore: merge main and resolve RCHASH conflict, keep PR value $PR_RCHASH" || {
-            echo "PR #$PR_NUMBER: Nothing to commit, conflicts may have been auto-resolved"
-            git merge --abort
-            continue
-          }
-          
-          # Push to PR branch
-          git push origin temp-$PR_BRANCH:$PR_BRANCH
-          
-          echo "PR #$PR_NUMBER: Successfully resolved and pushed"
-          
-          # Comment on PR
-          gh pr comment $PR_NUMBER --body "🔧 **RCHASH Conflict Auto-Resolved**
+            # Complete the merge
+            git commit -m "chore: merge main and resolve RCHASH conflict, keep PR value $PR_RCHASH"
+            
+            # Push to PR branch
+            git push origin temp-$PR_BRANCH:$PR_BRANCH
+            
+            echo "PR #$PR_NUMBER: Successfully resolved RCHASH conflict and pushed"
+            
+            # Comment on PR about successful resolution
+            gh pr comment $PR_NUMBER --body "🔧 **RCHASH Conflict Auto-Resolved**
         
         A merge to main caused a conflict in \`helm-chart/Chart.yml\`. The conflict has been automatically resolved by:
         
@@ -125,10 +116,43 @@ jobs:
         - ✅ **Keeping your PR's RCHASH**: \`$PR_RCHASH\`
         
         Your PR is now up-to-date and ready for review! 🚀"
+            
+          else
+            echo "PR #$PR_NUMBER: Multiple files have conflicts, cannot auto-resolve"
+            
+            # Abort the merge since we can't auto-resolve
+            git merge --abort
+            
+            # Check if Chart.yml is among the conflicted files
+            if echo "$CONFLICT_FILES" | grep -q "helm-chart/Chart.yml"; then
+              CHART_CONFLICT_MSG="⚠️ **Chart.yml** (including RCHASH conflict)"
+            else
+              CHART_CONFLICT_MSG=""
+            fi
+            
+            # Create a list of conflicted files for the comment
+            CONFLICT_LIST=$(echo "$CONFLICT_FILES" | sed 's/^/- `/' | sed 's/$/`/')
+            
+            # Comment on PR about conflicts that need manual resolution
+            gh pr comment $PR_NUMBER --body "⚠️ **Manual Conflict Resolution Required**
+        
+        A merge to main has created conflicts in multiple files that require your attention:
+        
+        $CONFLICT_LIST
+        
+        $CHART_CONFLICT_MSG
+        
+        **Next Steps:**
+        1. Pull the latest changes from main into your branch
+        2. Resolve the conflicts manually
+        3. For Chart.yml conflicts, please keep your RCHASH value: \`$PR_RCHASH\`
+        
+        The automated resolution was skipped because multiple files have conflicts that require developer review."
+          fi
           
           # Clean up
           git checkout main
-          git branch -D temp-$PR_BRANCH
+          git branch -D temp-$PR_BRANCH || true
           
         done
         
