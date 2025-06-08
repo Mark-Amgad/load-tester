@@ -13,13 +13,12 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v3
 
-      - name: Set up Docker Compose
+      - name: Start Docker Compose
         run: |
-          docker-compose up -d
-          # Wait for services to be fully ready
+          docker compose up -d
           sleep 10
-          docker-compose exec load-tester poetry run pytest
+          docker compose exec load-tester poetry run pytest
 
       - name: Shut down Docker Compose
         if: always()
-        run: docker-compose down
+        run: docker compose down
