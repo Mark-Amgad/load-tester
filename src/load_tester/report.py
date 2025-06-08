@@ -8,7 +8,6 @@ from load_tester.models.http import HTTPResponseResult
 
 class Report:
     def __init__(self, results: List[HTTPResponseResult]):
-        print("Generating report...")
         self.results = results
         self.success_count = 0
         self.failure_count = 0
