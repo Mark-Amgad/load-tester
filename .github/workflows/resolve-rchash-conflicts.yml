@@ -123,12 +123,6 @@ jobs:
             # Abort the merge since we can't auto-resolve
             git merge --abort
             
-            # Check if Chart.yml is among the conflicted files
-            if echo "$CONFLICT_FILES" | grep -q "helm-chart/Chart.yml"; then
-              CHART_CONFLICT_MSG="⚠️ **Chart.yml** (including RCHASH conflict)"
-            else
-              CHART_CONFLICT_MSG=""
-            fi
             
             # Create a list of conflicted files for the comment
             CONFLICT_LIST=$(echo "$CONFLICT_FILES" | sed 's/^/- `/' | sed 's/$/`/')
