@@ -1,5 +1,5 @@
 from .config import app
 
 if __name__ == "__main__":
-    print("add log 5")
+    print("add log 6")
     app()
