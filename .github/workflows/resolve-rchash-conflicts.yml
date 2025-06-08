@@ -135,19 +135,12 @@ jobs:
             
             # Comment on PR about conflicts that need manual resolution
             gh pr comment $PR_NUMBER --body "⚠️ **Manual Conflict Resolution Required**
+        The automated resolution was skipped because multiple files have conflicts that require developer review.
+        
         
         A merge to main has created conflicts in multiple files that require your attention:
         
-        $CONFLICT_LIST
-        
-        $CHART_CONFLICT_MSG
-        
-        **Next Steps:**
-        1. Pull the latest changes from main into your branch
-        2. Resolve the conflicts manually
-        3. For Chart.yml conflicts, please keep your RCHASH value: \`$PR_RCHASH\`
-        
-        The automated resolution was skipped because multiple files have conflicts that require developer review."
+        $CONFLICT_LIST"
           fi
           
           # Clean up
