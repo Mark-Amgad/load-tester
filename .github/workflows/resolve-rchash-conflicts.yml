@@ -23,113 +23,114 @@ jobs:
         token: ${{ secrets.GITHUB_TOKEN }}
         fetch-depth: 0
 
+    - name: Setup Git
+      run: |
+        git config --global user.email "action@github.com"
+        git config --global user.name "GitHub Action"
+
     - name: Resolve RCHASH conflicts in open PRs
-      uses: actions/github-script@v7
-      with:
-        script: |
-          // Get all open PRs targeting main
-          const { data: prs } = await github.rest.pulls.list({
-            owner: context.repo.owner,
-            repo: context.repo.repo,
-            state: 'open',
-            base: 'main'
-          });
+      run: |
+        # Get all open PRs using GitHub CLI
+        gh auth login --with-token <<< "${{ secrets.GITHUB_TOKEN }}"
+        
+        # Get open PRs as JSON
+        OPEN_PRS=$(gh pr list --state open --base main --json number,headRefName,title)
+        
+        echo "Open PRs: $OPEN_PRS"
+        
+        # Process each PR
+        echo "$OPEN_PRS" | jq -c '.[]' | while read pr; do
+          PR_NUMBER=$(echo "$pr" | jq -r '.number')
+          PR_BRANCH=$(echo "$pr" | jq -r '.headRefName')
+          PR_TITLE=$(echo "$pr" | jq -r '.title')
           
-          console.log(`Found ${prs.length} open PRs to check for conflicts`);
+          echo ""
+          echo "--- Processing PR #$PR_NUMBER: $PR_TITLE ---"
+          echo "Branch: $PR_BRANCH"
           
-          for (const pr of prs) {
-            try {
-              console.log(`\n--- Processing PR #${pr.number}: ${pr.title} ---`);
-              
-              // Get the current Chart.yml from the PR branch
-              let prChartFile;
-              try {
-                const { data } = await github.rest.repos.getContent({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  path: 'helm-chart/Chart.yml',
-                  ref: pr.head.ref
-                });
-                prChartFile = data;
-              } catch (error) {
-                console.log(`PR #${pr.number}: No Chart.yml found, skipping`);
-                continue;
-              }
-              
-              // Get the current Chart.yml from main branch
-              const { data: mainChartFile } = await github.rest.repos.getContent({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                path: 'helm-chart/Chart.yml',
-                ref: 'main'
-              });
-              
-              // Decode content
-              const prContent = Buffer.from(prChartFile.content, 'base64').toString();
-              const mainContent = Buffer.from(mainChartFile.content, 'base64').toString();
-              
-              // Extract RCHASH values
-              const prHashMatch = prContent.match(/RCHASH: (.+)/);
-              const mainHashMatch = mainContent.match(/RCHASH: (.+)/);
-              
-              const prHash = prHashMatch ? prHashMatch[1].trim() : null;
-              const mainHash = mainHashMatch ? mainHashMatch[1].trim() : null;
-              
-              console.log(`PR #${pr.number} RCHASH: ${prHash}`);
-              console.log(`Main RCHASH: ${mainHash}`);
-              
-              if (!prHash || !mainHash) {
-                console.log(`PR #${pr.number}: Missing RCHASH, skipping`);
-                continue;
-              }
-              
-              if (prHash === mainHash) {
-                console.log(`PR #${pr.number}: No RCHASH conflict, skipping`);
-                continue;
-              }
-              
-              // Merge main content but keep PR's RCHASH
-              console.log(`PR #${pr.number}: Resolving RCHASH conflict...`);
-              
-              // Replace main's RCHASH with PR's RCHASH
-              const resolvedContent = mainContent.replace(/RCHASH: .+/, `RCHASH: ${prHash}`);
-              
-              // Update the PR branch with resolved content
-              await github.rest.repos.createOrUpdateFileContents({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                path: 'helm-chart/Chart.yml',
-                message: `chore: resolve RCHASH conflict, keep PR value ${prHash}`,
-                content: Buffer.from(resolvedContent).toString('base64'),
-                sha: prChartFile.sha,
-                branch: pr.head.ref
-              });
-              
-              console.log(`PR #${pr.number}: Successfully resolved conflict`);
-              
-              // Comment on the PR
-              await github.rest.issues.createComment({
-                issue_number: pr.number,
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                body: `🔧 **RCHASH Conflict Auto-Resolved**\n\nA merge to main caused a conflict in \`helm-chart/Chart.yml\`. The conflict has been automatically resolved by:\n\n- ✅ **Keeping your PR's RCHASH**: \`${prHash}\`\n- ✅ **Updating other changes from main**\n\nYour PR is now up-to-date and ready for review! 🚀`
-              });
-              
-            } catch (error) {
-              console.error(`Failed to resolve conflict in PR #${pr.number}:`, error.message);
-              
-              // Comment about the failure
-              try {
-                await github.rest.issues.createComment({
-                  issue_number: pr.number,
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  body: `⚠️ **RCHASH Conflict Resolution Failed**\n\nThere was an issue automatically resolving the RCHASH conflict in this PR. You may need to manually resolve it.\n\nError: \`${error.message}\``
-                });
-              } catch (commentError) {
-                console.error(`Also failed to comment on PR #${pr.number}:`, commentError.message);
-              }
-            }
+          # Check if Chart.yml exists in PR branch
+          if ! git show origin/$PR_BRANCH:helm-chart/Chart.yml > /dev/null 2>&1; then
+            echo "PR #$PR_NUMBER: No Chart.yml found, skipping"
+            continue
+          fi
+          
+          # Get RCHASH from PR branch (before any conflicts)
+          PR_RCHASH=$(git show origin/$PR_BRANCH:helm-chart/Chart.yml | grep "RCHASH:" | awk '{print $2}' | tr -d ' ')
+          
+          # Get RCHASH from main branch
+          MAIN_RCHASH=$(git show main:helm-chart/Chart.yml | grep "RCHASH:" | awk '{print $2}' | tr -d ' ')
+          
+          echo "PR #$PR_NUMBER RCHASH: $PR_RCHASH"
+          echo "Main RCHASH: $MAIN_RCHASH"
+          
+          if [ "$PR_RCHASH" = "$MAIN_RCHASH" ]; then
+            echo "PR #$PR_NUMBER: No RCHASH conflict, skipping"
+            continue
+          fi
+          
+          # Checkout PR branch
+          git checkout -B temp-$PR_BRANCH origin/$PR_BRANCH
+          
+          # Check if there are conflicts by trying to merge
+          if git merge main --no-commit --no-ff > /dev/null 2>&1; then
+            echo "PR #$PR_NUMBER: No conflicts, cleaning up merge"
+            git merge --abort
+            continue
+          fi
+          
+          echo "PR #$PR_NUMBER: Conflicts detected, resolving..."
+          
+          # Merge main into PR branch (this will create conflicts)
+          git merge main --no-commit --no-ff || true
+          
+          # Check if Chart.yml has conflicts
+          if grep -q "<<<<<<< " helm-chart/Chart.yml 2>/dev/null; then
+            echo "PR #$PR_NUMBER: Found conflict markers in Chart.yml, resolving..."
+            
+            # Get the clean version from main
+            git show main:helm-chart/Chart.yml > helm-chart/Chart.yml.tmp
+            
+            # Replace main's RCHASH with PR's RCHASH
+            sed -i "s/RCHASH: .*/RCHASH: $PR_RCHASH/" helm-chart/Chart.yml.tmp
+            
+            # Replace the conflicted file with resolved version
+            mv helm-chart/Chart.yml.tmp helm-chart/Chart.yml
+            
+            # Mark as resolved
+            git add helm-chart/Chart.yml
+            
+            echo "PR #$PR_NUMBER: Resolved RCHASH conflict, keeping: $PR_RCHASH"
+          else
+            echo "PR #$PR_NUMBER: No conflicts in Chart.yml"
+          fi
+          
+          # Complete the merge
+          git commit -m "chore: merge main and resolve RCHASH conflict, keep PR value $PR_RCHASH" || {
+            echo "PR #$PR_NUMBER: Nothing to commit, conflicts may have been auto-resolved"
+            git merge --abort
+            continue
           }
           
-          console.log('\n--- Conflict resolution completed ---');
+          # Push to PR branch
+          git push origin temp-$PR_BRANCH:$PR_BRANCH
+          
+          echo "PR #$PR_NUMBER: Successfully resolved and pushed"
+          
+          # Comment on PR
+          gh pr comment $PR_NUMBER --body "🔧 **RCHASH Conflict Auto-Resolved**
+        
+        A merge to main caused a conflict in \`helm-chart/Chart.yml\`. The conflict has been automatically resolved by:
+        
+        - ✅ **Merging latest changes from main**
+        - ✅ **Keeping your PR's RCHASH**: \`$PR_RCHASH\`
+        
+        Your PR is now up-to-date and ready for review! 🚀"
+          
+          # Clean up
+          git checkout main
+          git branch -D temp-$PR_BRANCH
+          
+        done
+        
+        echo ""
+        echo "--- Conflict resolution completed ---"
