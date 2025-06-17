@@ -8,7 +8,7 @@ from load_tester.models.http import HTTPResponseResult
 
 class Report:
     def __init__(self, results: List[HTTPResponseResult]):
-        print("add log 4")
+        print("add log 5")
         self.results = results
         self.success_count = 0
         self.failure_count = 0
