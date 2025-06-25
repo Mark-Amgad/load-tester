@@ -29,7 +29,7 @@ jobs:
         # Generate a hash based on PR number and current timestamp
         PR_NUMBER="${{ github.event.number }}"
         TIMESTAMP=$(date +%s)
-        NEW_HASH=$(echo "${PR_NUMBER}-${TIMESTAMP}" | sha256sum | cut -c1-8)
+        NEW_HASH=$(echo "${PR_NUMBER}-${TIMESTAMP}" | sha256sum | cut -c1-6)
         echo "new_hash=${NEW_HASH}rc" >> $GITHUB_OUTPUT
         echo "Generated RCHASH: ${NEW_HASH}rc"
 
